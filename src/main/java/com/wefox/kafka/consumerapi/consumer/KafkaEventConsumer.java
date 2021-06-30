@@ -6,6 +6,8 @@ import com.wefox.kafka.consumerapi.entity.Payments;
 import com.wefox.kafka.consumerapi.model.PaymentModel;
 import com.wefox.kafka.consumerapi.service.ConsumerEventService;
 import lombok.extern.slf4j.Slf4j;
+
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -25,12 +27,12 @@ public class KafkaEventConsumer {
      */
 //    @KafkaListener(topics ="${props.topics.online}" )
     @KafkaListener(topics ="online" )
-    public void onMessageOnline(PaymentModel payment) throws JsonProcessingException {
+    public void onMessageOnline(ConsumerRecord<Integer,PaymentModel> consumerRecord) throws JsonProcessingException {
 
-        log.info("ConsumerRecord Online  : {} ", payment);
+        log.info("ConsumerRecord Online  : {} ", consumerRecord);
         
         
-    consumerEventService.verifyPayment(payment)
+    consumerEventService.verifyPayment(consumerRecord)
     .block();
 
     }
@@ -41,10 +43,10 @@ public class KafkaEventConsumer {
      * @throws JsonProcessingException
      */
     @KafkaListener(topics ="offline" )
-    public void onMessageOffline(PaymentModel payment) throws JsonProcessingException {
+    public void onMessageOffline(ConsumerRecord<Integer,PaymentModel> consumerRecord) throws JsonProcessingException {
 
-        log.info("ConsumerRecord Offline  : {} ", payment);
-     consumerEventService.savePayment(payment);
+        log.info("ConsumerRecord Offline  : {} ", consumerRecord);
+     consumerEventService.savePayment(consumerRecord);
 
     }
 }

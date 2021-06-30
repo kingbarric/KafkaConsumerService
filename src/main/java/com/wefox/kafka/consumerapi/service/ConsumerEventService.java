@@ -15,9 +15,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord; 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType; 
+import org.springframework.http.MediaType;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
@@ -25,8 +25,8 @@ import org.springframework.util.concurrent.ListenableFuture;
 import org.springframework.util.concurrent.ListenableFutureCallback;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.time.Duration; 
-import java.time.LocalDateTime; 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Optional;
 
@@ -45,9 +45,11 @@ public class ConsumerEventService {
 
 	private final ConfigProperties configProperties;
 
-	public void savePayment(PaymentModel paymentModel) {
+	public Mono<Void> savePayment(ConsumerRecord<Integer, PaymentModel> consumerRecord) {
 
 		try {
+
+			PaymentModel paymentModel = consumerRecord.value();
 
 			Optional<Accounts> accountOp = accountRepo.findById(paymentModel.getAccountId());
 			if (accountOp.isPresent()) {
@@ -63,13 +65,22 @@ public class ConsumerEventService {
 				account.setLastPaymentDate(LocalDateTime.now());
 				accountRepo.save(account);
 				log.info("Data saved into database ...");
+				return Mono.empty();
 			} else {
 
 				log.info("No such account number available");
+				return Mono.empty();
 			}
 
 		} catch (Exception e) {
-			log.info("Exception thrown while saving data ", e);
+
+			// log error
+			ErrorModel errorModel = ErrorModel.builder().paymentId(consumerRecord.value().getPaymentId())
+					.error(ErrorTypes.DATABASE).errorDescription("Network Error OCcured").build();
+
+			return logError(errorModel).doOnNext(res -> log.info("ErrorLogResponse :: {} ", res)).then();
+
+			// log.info("Exception thrown while saving data ", e);
 
 		}
 
@@ -77,11 +88,11 @@ public class ConsumerEventService {
 
 	public void handleRecovery(ConsumerRecord<Integer, PaymentModel> record) {
 
-		Integer key = record.key(); 
+		Integer key = record.key();
 		PaymentModel message = record.value();
 
 		ListenableFuture<SendResult<Integer, PaymentModel>> listenableFuture = kafkaTemplate.sendDefault(key, message);
-		
+
 		listenableFuture.addCallback(new ListenableFutureCallback<SendResult<Integer, PaymentModel>>() {
 			@Override
 			public void onFailure(Throwable ex) {
@@ -93,7 +104,6 @@ public class ConsumerEventService {
 				handleSuccess(key, message, result);
 			}
 
-		 
 		});
 	}
 
@@ -110,15 +120,15 @@ public class ConsumerEventService {
 		log.info("Message Sent SuccessFully for the key : {} and the value is {} , partition is {}", key, value,
 				result.getRecordMetadata().partition());
 	}
-	
-	
+
 	/**
-	 *  Make an Api call to verify payment
-	 * @param paymentModel
+	 * Make an Api call to verify payment
+	 * 
+	 * @param consumerRecord
 	 * @return
 	 */
 
-	public Mono<Void> verifyPayment(PaymentModel paymentModel) {
+	public Mono<Void> verifyPayment(ConsumerRecord<Integer, PaymentModel> consumerRecord) {
 
 		try {
 			return WebClient.builder().build().post().uri(configProperties.getConfirmPaymentUrl())
@@ -126,40 +136,48 @@ public class ConsumerEventService {
 						httpHeaders.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 						httpHeaders.setContentType(MediaType.APPLICATION_JSON);
 
-					}).body(Mono.just(paymentModel), PaymentModel.class).exchangeToMono(response -> {
+					}).body(Mono.just(consumerRecord.value()), PaymentModel.class).exchangeToMono(response -> {
 						log.info("response :: {} ", response);
 
 						if (response.statusCode().equals(HttpStatus.OK)) {
 
 							// save valid payment into database
 							log.info("Payment valid");
-							savePayment(paymentModel);
+							savePayment(consumerRecord);
 
-							return response.releaseBody().onErrorResume(exception -> Mono.empty());
+							return response.releaseBody().onErrorResume(exception -> {
+
+								// Network
+								ErrorModel errorModel = ErrorModel.builder()
+										.paymentId(consumerRecord.value().getPaymentId()).error(ErrorTypes.NETWORK)
+										.errorDescription("Network Error OCcured").build();
+
+								return logError(errorModel).doOnNext(res -> log.info("ErrorLogResponse :: {} ", res))
+										.then(); 	}
+
+					);
 						} else {
 							// Turn to error make another http call
-							
-							//A quick question would have been , how to tell the type of error to log??
+
 							log.info("Payment not  valid");
 							ErrorModel errorModel = ErrorModel.builder()
-									.paymentId(paymentModel.getPaymentId())
-									.error(ErrorTypes.NETWORK)
-									.errorDescription("Network Error OCcured")
-									.build();
-							
-						return	logError(errorModel)
-							.doOnNext(res->log.info("ErrorLogResponse :: {} ",res)).then(); 
+									.paymentId(consumerRecord.value().getPaymentId()).error(ErrorTypes.OTHERS)
+									.errorDescription("Network Error OCcured").build();
+
+							return logError(errorModel).doOnNext(res -> log.info("ErrorLogResponse :: {} ", res))
+									.then();
 						}
 					});
 		} catch (Exception e) {
 			log.info("Calling verify Error {}", e);
+
 			return Mono.empty();
 		}
 	}
 
 	/**
 	 * Log error
-	 * 
+	 *
 	 * @param errorModel
 	 * @return
 	 */
@@ -179,13 +197,12 @@ public class ConsumerEventService {
 
 					// save valid payment into database
 					log.info("Error logging was successful");
-				 
 
 					return response.releaseBody().onErrorResume(exception -> Mono.empty());
 				} else {
 					// Turn to error make another http call
 					log.info("call to log comeplete with error");
-				 
+
 					return Mono.empty();
 				}
 			}).timeout(Duration.ofMillis(configProperties.getTimeOut()));

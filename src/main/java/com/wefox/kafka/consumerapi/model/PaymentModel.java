@@ -3,8 +3,12 @@ package com.wefox.kafka.consumerapi.model;
  
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import lombok.Data;  
+import lombok.*;
 
+ 
+@Builder
+@AllArgsConstructor 
+@NoArgsConstructor
 @Data
 public class PaymentModel {
 	 @JsonProperty("payment_id")

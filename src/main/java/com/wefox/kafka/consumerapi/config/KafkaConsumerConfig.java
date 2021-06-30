@@ -49,11 +49,11 @@ public class KafkaConsumerConfig {
 
 	@Bean
 	@ConditionalOnMissingBean(name = "kafkaListenerContainerFactory")
-	ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory( ObjectProvider<ConsumerFactory<Object, Object>> kafkaConsumerFactory)
+	ConcurrentKafkaListenerContainerFactory<?, ?> kafkaListenerContainerFactory( ObjectProvider<ConsumerFactory<String, PaymentModel>> kafkaConsumerFactory)
 	{
 		ConcurrentKafkaListenerContainerFactory<String, PaymentModel> factory = new ConcurrentKafkaListenerContainerFactory<>();
 		factory.setConsumerFactory(consumerFactory()); 
-		factory.setConcurrency(2);
+		factory.setConcurrency(3);
 		// factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
 		factory.setErrorHandler(((thrownException, data) -> {
 			log.info("Exception in consumerConfig is {} and the record is {}", thrownException.getMessage(), data);
